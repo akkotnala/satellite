@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<html>
+<script src="https://d3js.org/d3.v3.min.js"></script>
+<script src="https://d3js.org/topojson.v1.min.js"></script>
+<script src="https://d3js.org/queue.v1.min.js"></script>
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/2.2.0/jquery.min.js"></script>
+
+<head>
+    <style>
+        body {
+            background: #fcfcfa;
+        }
+
+        .stroke {
+            fill: none;
+            stroke: #000;
+            stroke-width: 1px;
+        }
+
+        .fill {
+            fill: #f2f2f2;
+        }
+
+        .graticule {
+            fill: none;
+            stroke: #777;
+            stroke-width: .5px;
+            stroke-opacity: .5;
+        }
+
+        .land {
+            fill: darkgrey;
+        }
+
+        .boundary {
+            fill: none;
+            stroke: #fff;
+            stroke-width: .5px;
+        }
+
+        .graph,
+        .map {
+            float: left;
+        }
+
+        .scatter {
+            margin-left: 900px;
+            margin-top: -690px;
+            float: right;
+        }
+
+        .bottomText {
+            font-family: "Segoe UI", Arial, sans-serif;
+            font-weight: 400;
+            margin: 10px 0;
+        }
+    </style>
+
+</head>
+
+<body>
+    <svg class="graph" style="height: 700px; width: 800px;"></svg>
+    <svg class="scatter" style="width:800px;height:800px;"></svg>
+    <text class="bottomText" id="text"></text>
+</body>
+<script>
+    var width = 700,
+        height = 700;
+
+    var colors = {
+        clickable: 'darkgrey',
+        hover: 'grey',
+        clicked: "red",
+        clickhover: "darkred"
+    };
+
+    var randomColor = (function() {
+        var golden_ratio_conjugate = 0.618033988749895;
+        var h = Math.random();
+
+        var hslToRgb = function(h, s, l) {
+            var r, g, b;
+
+            if (s == 0) {
+                r = g = b = l; // achromatic
+            } else {
+                function hue2rgb(p, q, t) {
+                    if (t < 0) t += 1;
+                    if (t > 1) t -= 1;
+                    if (t < 1 / 6) return p + (q - p) * 6 * t;
+                    if (t < 1 / 2) return q;
+                    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+                    return p;
+                }
+
+                var q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+                var p = 2 * l - q;
+                r = hue2rgb(p, q, h + 1 / 3);
+                g = hue2rgb(p, q, h);
+                b = hue2rgb(p, q, h - 1 / 3);
+            }
+
+            return '#' + Math.round(r * 255).toString(16) + Math.round(g * 255).toString(16) + Math.round(b * 255).toString(16);
+        };
+
+        return function() {
+            h += golden_ratio_conjugate;
+            h %= 1;
+            return hslToRgb(h, 0.5, 0.60);
+        };
+    })();
+
+    var projection = d3.geo.orthographic()
+        .scale(300)
+        .translate([width / 2, height / 2])
+        .clipAngle(90)
+        .precision(10);
+
+    var path = d3.geo.path()
+        .projection(projection);
+
+    var graticule = d3.geo.graticule();
+
+    var map = d3.select("svg.graph")
+        .attr("class", "map");
+
+    map.append("defs").append("path")
+        .datum({
+            type: "Sphere"
+        })
+        .attr("id", "sphere")
+        .attr("d", path);
+
+    map.append("use")
+        .attr("class", "stroke")
+        .attr("xlink:href", "#sphere");
+
+    map.append("use")
+        .attr("class", "fill")
+        .attr("xlink:href", "#sphere");
+
+    map.append("path")
+        .datum(graticule)
+        .attr("class", "graticule")
+        .attr("d", path);
+
+    queue()
+        .defer(d3.json, "world-110m.json")
+        .defer(d3.csv, "names.csv")
+        .await(ready);
+
+    function ready(error, world, names) {
+        if (error) throw error;
+
+        var globe = {
+                type: "Sphere"
+            },
+            land = topojson.feature(world, world.objects.land),
+            countries = topojson.feature(world, world.objects.countries).features,
+            borders = topojson.mesh(world, world.objects.countries, function(a, b) {
+                return a !== b;
+            });
+
+        countries = countries.filter(function(d) {
+            return names.some(function(n) {
+                if (d.id == n.id) return d.name = n.name;
+            });
+        }).sort(function(a, b) {
+            return a.name.localeCompare(b.name);
+        });
+
+        map.insert("path", ".graticule")
+            .datum(topojson.feature(world, world.objects.land))
+            .attr("class", "land")
+            .attr("d", path);
+
+        for (i = 0; i < names.length; i++) {
+            for (j = 0; j < countries.length; j++) {
+                if (countries[j].id == names[i].id) {
+                    map.insert("path", ".graticule")
+                        .datum(countries[j])
+                        .attr("fill", colors.clickable)
+                        .attr("d", path)
+                        .attr("class", "clickable")
+                        .attr("data-country-id", j)
+                        .on("click", function(d) {
+                            d3.selectAll(".clicked")
+                                .classed("clicked", false)
+                                .attr("fill", colors.clickable)
+                            console.log("clicked");
+                            d3.selectAll("text.bottomText")
+                                .text(d.name)
+                            d3.select("svg").selectAll("circle").remove();
+
+                            d3.select("svg.scatter").selectAll("circle").remove();
+                            d3.select(this)
+                                .classed("clicked", true)
+                                .attr("fill", colors.clicked);
+                            (function transition() {
+                                d3.select(".clicked").transition()
+                                    .duration(1250)
+                                    .tween("rotate", function() {
+                                        var p = d3.geo.centroid(countries[d3.select(this).attr("data-country-id")]),
+                                            r = d3.interpolate(projection.rotate(), [-p[0], -p[1]]);
+                                        return function(t) {
+                                            projection.rotate(r(t));
+                                            map.selectAll("path").attr("d", path);
+                                        }
+
+                                    });
+                            })();
+                            d3.csv('satellite.csv', function(data) {
+
+                                var clickedCountry = data.filter(function(obj) {
+                                    return obj.Country == d.name;
+                                });
+                                console.log(clickedCountry);
+                                console.log(d.random)
+                                d3.select("svg.scatter")
+                                    .selectAll("circle")
+                                    .data(clickedCountry)
+                                    .enter()
+                                    .append('circle')
+                                    .attr('r', '10')
+                                    .attr('cx', d => d.random)
+                                    .attr('cy', d => 10 + parseFloat(d.Apogee))
+                                    .attr('stroke-width', 1)
+                                    .style('fill', randomColor)
+                                    .on("click", function(d) {
+
+                                        d3.select("svg").selectAll("circle").remove();
+                                        var test = d3.json("https://www.n2yo.com/rest/v1/satellite/positions/" + d.NORAD_Number + "/43.390/80.4032/0/2/&apiKey=EHBUSU-49HANM-DCESZL-3VC5", noradData);
+
+                                        function noradData(incomingData) {
+                                            console.log(incomingData);
+                                            d3.select("svg").selectAll("circle").data(clickedCountry)
+                                                .enter()
+                                                .append("circle")
+                                                .attr("class", "cities")
+                                                .attr("r", 10)
+                                                .style('fill', randomColor)
+                                                .attr("cx", projection([incomingData.positions[0].satlatitude, incomingData.positions[0].satlongitude])[0])
+                                                .attr("cy", projection([incomingData.positions[0].satlatitude, incomingData.positions[0].satlongitude])[1])
+                                                .on('mouseover', function() {
+                                                    d3.select(this)
+                                                        .transition()
+                                                        .duration(500)
+                                                        .attr('r', 20)
+                                                        .attr('stroke-width', 3)
+                                                })
+                                                .on('mouseout', function() {
+                                                    d3.select(this)
+                                                        .transition()
+                                                        .duration(500)
+                                                        .attr('r', 10)
+                                                        .attr('stroke-width', 1)
+                                                })
+                                                .append('title') // Tooltip
+                                                .text(function(d) {
+                                                    return '\nName: ' + incomingData.info.satname +
+                                                        '\nID: ' + incomingData.info.satid
+                                                });
+                                        }
+
+                                    })
+                                    .on('mouseover', function() {
+                                        d3.select(this)
+                                            .transition()
+                                            .duration(500)
+                                            .attr('r', 20)
+                                            .attr('stroke-width', 3)
+                                    })
+                                    .on('mouseout', function() {
+                                        d3.select(this)
+                                            .transition()
+                                            .duration(500)
+                                            .attr('r', 10)
+                                            .attr('stroke-width', 1)
+                                    })
+                                    .append('title') // Tooltip
+                                    .text(function(d) {
+                                        return '\nName: ' + d.Name +
+                                            '\nUser: ' + d.Users + '\nLIFE: ' + d.Expected_Lifetime +
+                                            '\nCountry: ' + d.Country
+                                    });
+
+                                //                                var yAxis = d3.svg.axis().orient("right").scale(yScale);
+
+
+                                //                                var xAxis = d3.svg.axis().orient("bottom").scale(xScale);
+                                //
+                                //                                d3.select("svg.scatter").append("g").attr("id", "xAxisG").call(xAxis)
+                                //                                    .append('text')
+                                //                                    .attr('class', 'label')
+                                //                                    .attr('y', 25)
+                                //                                    .attr('dy', '.71em')
+                                //                                    .style('text-anchor', 'end')
+                                //                                    .text('Perigee (Distance from earth in km.)');
+                                //                                d3.select("svg.scatter").append("g").attr("id", "xAxisG").call(xAxis)
+
+                                //                                yAxis = d3.svg.axis().orient("right").scale(yScale)
+                                //                                    .ticks(5)
+                                //
+                                //                                d3.select("svg.scatter").append("g").call(yAxis)
+                                //                                    .append('text')
+                                //                                    .attr('class', 'label')
+                                //                                    .attr('x', -10)
+                                //                                    .attr('dy', '.71em')
+                                //                                    .style('text-anchor', 'end')
+                                //                                    .text('Perigee (Distance from earth in km.)');
+                                //
+                                //                                d3.select("svg.scatter").append("g").attr("id", "xAxisG").call(xAxis)
+                                //                                d3.select("svg.scatter").selectAll("circle")
+                                //                                    .data(clickedCountry)
+                                //                                    .enter()
+                                //                                    .append("circle").attr("r", d => d.Expected_Lifetime)
+                                //                                    .attr("cy", d.Perigee)
+                            })
+                        })
+                        .on("mousemove", function() {
+                            var c = d3.select(this);
+                            if (c.classed("clicked")) {
+                                c.attr("fill", colors.clickhover)
+                            } else {
+                                c.attr("fill", colors.hover);
+                            }
+                        })
+
+                        .on("mouseout", function() {
+                            var c = d3.select(this);
+                            if (c.classed("clicked")) {
+                                c.attr("fill", colors.clicked)
+                            } else {
+                                d3.select(this).attr("fill", colors.clickable);
+                            }
+                        });
+                }
+            }
+
+        }
+
+        map.insert("path", ".graticule")
+            .datum(topojson.mesh(world, world.objects.countries, function(a, b) {
+                return a !== b;
+            }))
+            .attr("class", "boundary")
+            .attr("d", path);
+    };
+
+
+    d3.select(self.frameElement).style("height", height + "px");
+</script>
+
+</html>
